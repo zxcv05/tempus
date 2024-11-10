@@ -11,6 +11,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .target = target,
 
+        .link_libc = true,
         .strip = optimize != .Debug,
     });
 
