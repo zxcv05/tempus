@@ -14,10 +14,9 @@ pub fn build(b: *std.Build) void {
         .strip = optimize != .Debug,
     });
 
-    const zeit_dependency = b.dependency("zeit", .{});
-    exe.root_module.addImport("zeit", zeit_dependency.module("zeit"));
-
     exe.link_gc_sections = true;
+
+    exe.root_module.addImport("datetime", b.dependency("datetime", .{}).module("zig-datetime"));
 
     b.installArtifact(exe);
 

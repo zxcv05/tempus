@@ -2,9 +2,9 @@
     .name = "tempus-zig",
     .version = "0.0.0",
     .dependencies = .{
-        .zeit = .{
-            .url = "git+https://github.com/rockorager/zeit#5041c7cac243f0d05f4578a334f52e12bb450e55",
-            .hash = "12204b653c90b503f89e2f1a73c4754b83fb7275c100c81872deaca12c9f17e334ec",
+        .datetime = .{
+            .url = "git+https://github.com/frmdstryr/zig-datetime#70aebf28fb3e137cd84123a9349d157a74708721",
+            .hash = "122077215ce36e125a490e59ec1748ffd4f6ba00d4d14f7308978e5360711d72d77f",
         },
     },
     .paths = .{
