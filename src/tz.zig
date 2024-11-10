@@ -5,9 +5,10 @@ const time = @cImport({
     @cInclude("time.h");
 });
 
-pub fn get_timezone_hour_offset() i32 {
+/// In minutes
+pub fn get_timezone_offset() i16 {
     time.tzset();
     const current_time = time.time(null);
     const timeinfo = time.localtime(&current_time);
-    return @intCast(@divFloor(timeinfo.*.tm_gmtoff, std.time.s_per_hour));
+    return @intCast(@divFloor(timeinfo.*.tm_gmtoff, std.time.s_per_min));
 }
