@@ -2,7 +2,7 @@ const std = @import("std");
 const datetime = @import("datetime").datetime;
 
 const tz = @import("tz.zig");
-const art = @import("number-art.zig").art;
+const art = @import("ascii-art.zig").art;
 const Termios = @import("termios.zig");
 const Context = @import("context.zig");
 
@@ -20,6 +20,13 @@ var ctx: Context = .{
 
 pub fn main() !void {
     defer _ = gpa.deinit();
+
+    // TODO(cli): Argument parsing
+    // - Red-color flag
+    // - 12-hour clock flag
+
+    // TODO: Red color mode
+    // TODO: 12 hour clock mode
 
     const stdout = std.io.getStdOut();
     defer stdout.close();
