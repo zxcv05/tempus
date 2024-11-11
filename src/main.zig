@@ -2,11 +2,24 @@ const std = @import("std");
 const datetime = @import("datetime").datetime;
 
 const tz = @import("tz.zig");
-const art = @import("number_art.zig").art;
+const art = @import("number-art.zig").art;
 const Termios = @import("termios.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var alloc = gpa.allocator();
+
+const Context = struct {
+    const Size = struct {
+        row: std.atomic.Value(u32),
+        col: std.atomic.Value(u32),
+        changed: std.atomic.Value(bool),
+    };
+
+    size: Size,
+    running: std.atomic.Value(bool),
+};
+
+var ctx: ?*Context = null;
 
 pub fn main() !void {
     defer _ = gpa.deinit();
@@ -34,11 +47,29 @@ pub fn main() !void {
     _ = try stdout.write("\x1b[?1049h");
     defer _ = stdout.write("\x1b[?1049l") catch {};
 
-    // TODO(correctness): Handle WINCH signal
-    const size = try Termios.get_size();
+    ctx = try alloc.create(Context);
+    defer alloc.destroy(ctx.?);
+    ctx.?.running = .{ .raw = true };
+
+    {
+        const size = try Termios.get_size();
+        ctx.?.size = .{
+            .col = .{ .raw = size.ws_col },
+            .row = .{ .raw = size.ws_row },
+            .changed = .{ .raw = false },
+        };
+    }
+
+    const winch_sigaction = std.posix.Sigaction{
+        .handler = .{ .handler = sigaction_handler },
+        .mask = std.posix.empty_sigset,
+        .flags = 0,
+    };
+
+    try std.posix.sigaction(std.posix.SIG.WINCH, &winch_sigaction, null);
 
     var buffer: [64]u8 = undefined;
-    main: while (true) {
+    main: while (ctx.?.running.load(.seq_cst)) {
         const start = std.time.nanoTimestamp();
 
         // Input handling
@@ -58,6 +89,10 @@ pub fn main() !void {
             if (read < buffer.len - 4) break;
         }
 
+        if (ctx.?.size.changed.swap(false, .seq_cst)) {
+            _ = try stdout.writeAll("\x1b[2J");
+        }
+
         // Render
         const now = datetime.Datetime.now().shiftTimezone(&timezone);
 
@@ -67,8 +102,8 @@ pub fn main() !void {
         const block_height = 5;
 
         const x_mid_offset = 2;
-        const x_mid = @divFloor(size.ws_col, 2) + x_mid_offset;
-        const y_mid = @divFloor(size.ws_row, 2) - 1;
+        const x_mid = @divFloor(ctx.?.size.col.load(.seq_cst), 2) + x_mid_offset;
+        const y_mid = @divFloor(ctx.?.size.row.load(.seq_cst), 2) - 1;
 
         for (0..4) |i| {
             const num = numbers[i] - '0'; // all inputs are between ascii 0 and ascii 9
@@ -112,5 +147,18 @@ pub fn main() !void {
         if (start >= end) continue;
 
         std.time.sleep(std.time.ns_per_ms * 125 - @as(u64, @intCast(end - start)));
+    }
+}
+
+fn sigaction_handler(signal: i32) callconv(.C) void {
+    switch (signal) {
+        std.posix.SIG.WINCH => {
+            const size = Termios.get_size() catch return;
+
+            ctx.?.size.changed.store(true, .seq_cst);
+            ctx.?.size.col.store(size.ws_col, .seq_cst);
+            ctx.?.size.row.store(size.ws_row, .seq_cst);
+        },
+        else => {},
     }
 }
