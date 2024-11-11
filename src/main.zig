@@ -4,22 +4,19 @@ const datetime = @import("datetime").datetime;
 const tz = @import("tz.zig");
 const art = @import("number-art.zig").art;
 const Termios = @import("termios.zig");
+const Context = @import("context.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var alloc = gpa.allocator();
 
-const Context = struct {
-    const Size = struct {
-        row: std.atomic.Value(u32),
-        col: std.atomic.Value(u32),
-        changed: std.atomic.Value(bool),
-    };
-
-    size: Size,
-    running: std.atomic.Value(bool),
+var ctx: Context = .{
+    .running = .{ .raw = true },
+    .size = .{
+        .changed = .{ .raw = true }, // Set to true so first start will clear screen
+        .col = .{ .raw = 0 },
+        .row = .{ .raw = 0 },
+    },
 };
-
-var ctx: ?*Context = null;
 
 pub fn main() !void {
     defer _ = gpa.deinit();
@@ -35,61 +32,52 @@ pub fn main() !void {
 
     const termios = try Termios.init();
 
-    // Raw mode
     try termios.set();
     defer termios.reset() catch {};
 
-    // Cursor visiblity
-    _ = try stdout.write("\x1b[?25l");
+    _ = try stdout.write("\x1b[?25l"); // Cursor visiblity
     defer _ = stdout.write("\x1b[?25h") catch {};
 
-    // Alternate buffer
-    _ = try stdout.write("\x1b[?1049h");
+    _ = try stdout.write("\x1b[?1049h"); // Alternate buffer
     defer _ = stdout.write("\x1b[?1049l") catch {};
-
-    ctx = try alloc.create(Context);
-    defer alloc.destroy(ctx.?);
-    ctx.?.running = .{ .raw = true };
 
     {
         const size = try Termios.get_size();
-        ctx.?.size = .{
-            .col = .{ .raw = size.ws_col },
-            .row = .{ .raw = size.ws_row },
-            .changed = .{ .raw = false },
-        };
+        ctx.size.col.store(size.ws_col, .unordered);
+        ctx.size.row.store(size.ws_row, .unordered);
     }
 
-    const winch_sigaction = std.posix.Sigaction{
+    const sigaction = std.posix.Sigaction{
         .handler = .{ .handler = sigaction_handler },
         .mask = std.posix.empty_sigset,
         .flags = 0,
     };
 
-    try std.posix.sigaction(std.posix.SIG.WINCH, &winch_sigaction, null);
+    try std.posix.sigaction(std.posix.SIG.WINCH, &sigaction, null);
 
     var buffer: [64]u8 = undefined;
-    main: while (ctx.?.running.load(.seq_cst)) {
+    main: while (ctx.running.load(.seq_cst)) {
         const start = std.time.nanoTimestamp();
 
         // Input handling
         while (true) {
-            const read = stdin.read(buffer[4..]) catch |e| switch (e) {
+            const read = stdin.read(buffer[0..]) catch |e| switch (e) {
                 error.WouldBlock => 0,
                 else => return e,
             };
 
-            for (0..read) |i| switch (buffer[4 + i]) {
+            for (0..read) |i| switch (buffer[i]) {
                 3, // ctrl+c
                 27, // escape
                 => break :main,
                 else => {},
             };
 
-            if (read < buffer.len - 4) break;
+            if (read < buffer.len) break;
         }
 
-        if (ctx.?.size.changed.swap(false, .seq_cst)) {
+        // Update
+        if (ctx.size.changed.swap(false, .seq_cst)) {
             _ = try stdout.writeAll("\x1b[2J");
         }
 
@@ -102,8 +90,8 @@ pub fn main() !void {
         const block_height = 5;
 
         const x_mid_offset = 2;
-        const x_mid = @divFloor(ctx.?.size.col.load(.seq_cst), 2) + x_mid_offset;
-        const y_mid = @divFloor(ctx.?.size.row.load(.seq_cst), 2) - 1;
+        const x_mid = @divFloor(ctx.size.col.load(.seq_cst), 2) + x_mid_offset;
+        const y_mid = @divFloor(ctx.size.row.load(.seq_cst), 2) - 1;
 
         for (0..4) |i| {
             const num = numbers[i] - '0'; // all inputs are between ascii 0 and ascii 9
@@ -125,7 +113,7 @@ pub fn main() !void {
                     break :attr_csi_ending //
                     if (representation == now.time.second) "48;5;8" // highlight
                     else if (current_art & (art_bit_0 >> art_index) != 0) "1" // bold
-                    else "38;5;238"; //dim
+                    else "38;5;238"; // dim
                 };
 
                 _ = try stdout.writer().print("\x1b[{d};{d}H" ++ "\x1b[{s}m" ++ "{d:0>2}" ++ "\x1b[m", .{
@@ -155,10 +143,10 @@ fn sigaction_handler(signal: i32) callconv(.C) void {
         std.posix.SIG.WINCH => {
             const size = Termios.get_size() catch return;
 
-            ctx.?.size.changed.store(true, .seq_cst);
-            ctx.?.size.col.store(size.ws_col, .seq_cst);
-            ctx.?.size.row.store(size.ws_row, .seq_cst);
+            ctx.size.changed.store(true, .seq_cst);
+            ctx.size.col.store(size.ws_col, .seq_cst);
+            ctx.size.row.store(size.ws_row, .seq_cst);
         },
-        else => {},
+        else => unreachable,
     }
 }
