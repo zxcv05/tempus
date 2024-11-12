@@ -108,7 +108,14 @@ pub fn main() !void {
             const second = now.time.second;
             const minute = now.time.minute;
             const is_am = now.time.hour <= 12;
-            const hour = if (is_am or !ctx.flags.am_pm) now.time.hour else now.time.hour - 12;
+            const hour = calculate_hour: {
+                var hour = now.time.hour;
+                if (ctx.flags.am_pm) {
+                    if (is_am and hour == 0) hour = 12;
+                    if (!is_am) hour -= 12;
+                }
+                break :calculate_hour hour;
+            };
 
             const numbers = try std.fmt.bufPrint(buffer[0..4], "{d:0>2}{d:0>2}", .{ hour, minute });
 
