@@ -2,37 +2,46 @@ const std = @import("std");
 const datetime = @import("datetime").datetime;
 
 const tz = @import("tz.zig");
-const art = @import("ascii-art.zig").art;
+const art = @import("ascii-art.zig");
 const Termios = @import("termios.zig");
 const Context = @import("context.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var alloc = gpa.allocator();
 
-var ctx: Context = .{
-    .running = .{ .raw = true },
-    .size = .{
-        .changed = .{ .raw = true }, // Set to true so first start will clear screen
-        .col = .{ .raw = 0 },
-        .row = .{ .raw = 0 },
-    },
-};
+var ctx = Context{};
 
 pub fn main() !void {
     defer _ = gpa.deinit();
 
-    // TODO(cli): Argument parsing
-    // - Red-color flag
-    // - 12-hour clock flag
-
-    // TODO: Red color mode
-    // TODO: 12 hour clock mode
+    const args = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, args);
 
     const stdout = std.io.getStdOut();
     defer stdout.close();
 
     const stdin = std.io.getStdIn();
     defer stdin.close();
+
+    const help_fmt =
+        \\Usage: {s} [-cr]
+        \\
+        \\  -c | Enable 12-hour clock
+        \\  -r | Enable red-color mode
+        \\
+    ;
+
+    for (args[1..]) |arg| {
+        if (arg[0] != '-') _ = return try stdout.writer().print(help_fmt, .{args[0]});
+
+        for (arg[1..]) |c| switch (c) {
+            'c' => ctx.flags.am_pm = true, // 12 hour
+            'r' => ctx.flags.red_tint = true, // red
+            else => {
+                return try stdout.writer().print(help_fmt, .{args[0]});
+            },
+        };
+    }
 
     const tz_offset = tz.get_timezone_offset();
     const timezone = datetime.Timezone.create("Local", tz_offset);
@@ -63,6 +72,8 @@ pub fn main() !void {
     try std.posix.sigaction(std.posix.SIG.WINCH, &sigaction, null);
 
     var buffer: [64]u8 = undefined;
+
+    // TODO(performance): Only render when the second has changed
     main: while (ctx.running.load(.seq_cst)) {
         const start = std.time.nanoTimestamp();
 
@@ -91,7 +102,12 @@ pub fn main() !void {
         // Render
         const now = datetime.Datetime.now().shiftTimezone(&timezone);
 
-        const numbers = try std.fmt.bufPrint(buffer[0..4], "{d:0>2}{d:0>2}", .{ now.time.hour, now.time.minute });
+        const second = now.time.second;
+        const minute = now.time.minute;
+        const is_am = now.time.hour <= 12;
+        const hour = if (is_am or !ctx.flags.am_pm) now.time.hour else now.time.hour - 12;
+
+        const numbers = try std.fmt.bufPrint(buffer[0..4], "{d:0>2}{d:0>2}", .{ hour, minute });
 
         const block_width = 3;
         const block_height = 5;
@@ -100,12 +116,17 @@ pub fn main() !void {
         const x_mid = @divFloor(ctx.size.col.load(.seq_cst), 2) + x_mid_offset;
         const y_mid = @divFloor(ctx.size.row.load(.seq_cst), 2) - 1;
 
+        const x_step: i8 = 3;
+        const x_spacing = 10;
+
+        const color_highlight = if (ctx.flags.red_tint) art.redtint_highlight else art.default_highlight;
+        const color_bold = if (ctx.flags.red_tint) art.redtint_bold else art.default_bold;
+        const color_dim = if (ctx.flags.red_tint) art.redtint_dim else art.default_dim;
+
         for (0..4) |i| {
             const num = numbers[i] - '0'; // all inputs are between ascii 0 and ascii 9
-            const current_art = art[num];
+            const current_art = art.blocks[num];
 
-            const x_step: i8 = 3;
-            const x_spacing = 10;
             const x_offset = (-x_spacing * 2) +
                 @as(isize, @intCast(x_spacing * i)) +
                 @as(isize, if (i < 2) -2 else 2);
@@ -116,26 +137,50 @@ pub fn main() !void {
                 const art_index: u4 = @intCast(y * block_width + x);
                 const representation: u6 = @intCast((block_width * block_height * i) + (x * block_height + y));
 
-                const attr = attr_csi_ending: {
-                    break :attr_csi_ending //
-                    if (representation == now.time.second) "48;5;8" // highlight
-                    else if (current_art & (art_bit_0 >> art_index) != 0) "1" // bold
-                    else "38;5;238"; // dim
-                };
+                const highlight = if (representation == second) color_highlight else "";
+                const color = if (current_art & (art_bit_0 >> art_index) != 0) color_bold else color_dim;
 
-                _ = try stdout.writer().print("\x1b[{d};{d}H" ++ "\x1b[{s}m" ++ "{d:0>2}" ++ "\x1b[m", .{
+                _ = try stdout.writer().print("\x1b[{d};{d}H" ++ "{s}{s}" ++ "{d:0>2}" ++ "\x1b[m", .{
                     y_mid + y,
                     x_mid + x_offset + @as(isize, @intCast(x)) * x_step,
-                    attr,
+                    highlight,
+                    color,
                     representation,
                 });
             };
         }
 
+        // AM / PM indicator
+        if (ctx.flags.am_pm) {
+            const x_offset = 4 + x_spacing * 2;
+
+            for (0..block_height) |y| for (0..block_width) |x| {
+                const art_bit_0: u15 = 0x4000;
+                const art_index: u4 = @intCast(y * block_width + x);
+
+                const current_art = art.blocks[if (is_am) 10 else 11];
+                const color = if (current_art & (art_bit_0 >> art_index) != 0) color_bold else color_dim;
+
+                _ = try stdout.writer().print("\x1b[{d};{d}H" ++ "{s}" ++ "{s}" ++ "\x1b[m", .{
+                    y_mid + y,
+                    x_mid + x_offset + x * x_step,
+                    color,
+                    if (is_am) "am" else "pm",
+                });
+            };
+        }
+
         // Middle column
+        const is_shown = @mod(second, 2) == 0;
         inline for ([2]usize{ 1, 3 }) |y| {
             _ = try stdout.writer().print("\x1b[{d};{d}H", .{ y_mid + y, x_mid - x_mid_offset });
-            _ = try stdout.write(if (@mod(now.time.second, 2) == 0) "🬇🬃" else "  ");
+            _ = try stdout.writer().print(
+                "{s}{s}",
+                if (is_shown)
+                    .{ color_bold, "🬇🬃" }
+                else
+                    .{ "", "  " },
+            );
         }
 
         const end = std.time.nanoTimestamp();

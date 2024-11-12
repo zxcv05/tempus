@@ -24,5 +24,7 @@ pub fn build(b: *std.Build) void {
     const run = b.addRunArtifact(exe);
     const step = b.step("run", "Run program");
 
+    if (b.args) |args| run.addArgs(args);
+
     step.dependOn(&run.step);
 }

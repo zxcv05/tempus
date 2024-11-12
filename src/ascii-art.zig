@@ -1,6 +1,6 @@
 /// Y:X
 /// width 3 height 5
-pub const art: [12]u15 = .{
+pub const blocks: [12]u15 = .{
     0b111101101101111, // 0
     0b110010010010111, // 1
     0b111001111100111, // 2
@@ -14,3 +14,13 @@ pub const art: [12]u15 = .{
     0b111101111101101, // A - 10
     0b111101111100100, // P - 11
 };
+
+// Normal colors
+pub const default_highlight = "\x1b[48;5;8m";
+pub const default_bold = "\x1b[1m";
+pub const default_dim = "\x1b[38;5;238m";
+
+// Red-tint
+pub const redtint_highlight = "\x1b[48;5;52m";
+pub const redtint_bold = "\x1b[1;38;5;196m";
+pub const redtint_dim = "\x1b[38;5;238m";
