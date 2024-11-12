@@ -19,6 +19,7 @@ const Termios = @This();
 
 original: c_termios.termios,
 
+// TODO(correctness): use std.posix functions where possible
 pub fn init() !Termios {
     var original: c_termios.termios = undefined;
 
