@@ -69,7 +69,15 @@ pub fn main() !void {
         .flags = 0,
     };
 
-    try std.posix.sigaction(std.posix.SIG.WINCH, &sigaction, null);
+    inline for ([_]comptime_int{
+        std.posix.SIG.WINCH,
+        std.posix.SIG.HUP,
+        std.posix.SIG.INT,
+        std.posix.SIG.TERM,
+        std.posix.SIG.QUIT,
+    }) |sig| {
+        try std.posix.sigaction(sig, &sigaction, null);
+    }
 
     var last_second: u8 = 0xff;
     var buffer: [64]u8 = undefined;
@@ -87,6 +95,7 @@ pub fn main() !void {
             for (0..read) |i| switch (buffer[i]) {
                 3, // ctrl+c
                 27, // escape
+                28, // ctrl+\
                 => break :main,
                 else => {},
             };
@@ -211,6 +220,11 @@ fn sigaction_handler(signal: i32) callconv(.C) void {
             ctx.size.col.store(size.ws_col, .seq_cst);
             ctx.size.row.store(size.ws_row, .seq_cst);
         },
+        std.posix.SIG.HUP,
+        std.posix.SIG.INT,
+        std.posix.SIG.TERM,
+        std.posix.SIG.QUIT,
+        => ctx.running.store(false, .seq_cst),
         else => unreachable,
     }
 }
