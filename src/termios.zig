@@ -1,16 +1,5 @@
 const std = @import("std");
 
-// TODO(correctness): Use build.zig instead of cImport
-const c = switch (@import("builtin").os.tag) {
-    .linux, .macos => {
-        @cImport({
-            @cInclude("asm/termbits.h");
-            @cInclude("sys/ioctl.h");
-        });
-    },
-    else => @compileError("Unsupported OS"),
-};
-
 const stdout = std.posix.STDOUT_FILENO;
 const stdin = std.posix.STDIN_FILENO;
 
