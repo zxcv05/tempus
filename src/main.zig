@@ -59,8 +59,8 @@ pub fn main() !void {
 
     {
         const size = try Termios.get_size();
-        ctx.size.col.store(size.ws_col, .unordered);
-        ctx.size.row.store(size.ws_row, .unordered);
+        ctx.size.col.store(size.col, .unordered);
+        ctx.size.row.store(size.row, .unordered);
     }
 
     const sigaction = std.posix.Sigaction{
@@ -217,8 +217,8 @@ fn sigaction_handler(signal: i32) callconv(.C) void {
             const size = Termios.get_size() catch return;
 
             ctx.size.changed.store(true, .seq_cst);
-            ctx.size.col.store(size.ws_col, .seq_cst);
-            ctx.size.row.store(size.ws_row, .seq_cst);
+            ctx.size.col.store(size.col, .seq_cst);
+            ctx.size.row.store(size.row, .seq_cst);
         },
         std.posix.SIG.HUP,
         std.posix.SIG.INT,

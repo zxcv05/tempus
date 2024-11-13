@@ -1,10 +1,15 @@
 const std = @import("std");
 
 // TODO(correctness): Use build.zig instead of cImport
-const c = @cImport({
-    @cInclude("asm/termbits.h");
-    @cInclude("sys/ioctl.h");
-});
+const c = switch (@import("builtin").os.tag) {
+    .linux, .macos => {
+        @cImport({
+            @cInclude("asm/termbits.h");
+            @cInclude("sys/ioctl.h");
+        });
+    },
+    else => @compileError("Unsupported OS"),
+};
 
 const stdout = std.posix.STDOUT_FILENO;
 const stdin = std.posix.STDIN_FILENO;
@@ -43,17 +48,19 @@ pub fn reset(this: *const Termios) !void {
 }
 
 /// Query ioctl for window size
-pub fn get_size() !std.posix.winsize {
+pub fn get_size() !Size {
     var size: std.posix.winsize = undefined;
 
-    // TODO(compat): Replace std.os.linux with cross-platform solution
     const rc = std.os.linux.ioctl(stdout, std.os.linux.T.IOCGWINSZ, @intFromPtr(&size));
     switch (std.posix.errno(rc)) {
         .SUCCESS => {},
         else => return error.Failed,
     }
 
-    return size;
+    return .{
+        .col = size.ws_col,
+        .row = size.ws_row,
+    };
 }
 
 /// Minimal port of cfmakeraw
@@ -72,3 +79,8 @@ fn make_raw(original: *const std.posix.termios) std.posix.termios {
 
     return copy;
 }
+
+pub const Size = struct {
+    col: u16,
+    row: u16,
+};
