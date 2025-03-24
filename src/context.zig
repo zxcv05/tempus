@@ -14,6 +14,7 @@ const Size = struct {
 const Flags = struct {
     am_pm: bool = false,
     red_tint: bool = false,
+    show_date: bool = false,
 };
 
 size: Size = .{},

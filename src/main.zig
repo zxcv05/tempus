@@ -1,18 +1,23 @@
 const std = @import("std");
-const datetime = @import("datetime").datetime;
+const zeit = @import("zeit");
 
-const tz = @import("tz.zig");
 const art = @import("ascii-art.zig");
 const Termios = @import("termios.zig");
 const Context = @import("context.zig");
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-var alloc = gpa.allocator();
-
 var ctx = Context{};
 
 pub fn main() !void {
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
     defer _ = gpa.deinit();
+
+    const alloc = gpa.allocator();
+
+    var env = try std.process.getEnvMap(alloc);
+    defer env.deinit();
+
+    const local_tz = try zeit.local(alloc, &env);
+    defer local_tz.deinit();
 
     const args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, args);
@@ -24,10 +29,11 @@ pub fn main() !void {
     defer stdin.close();
 
     const help_fmt =
-        \\Usage: {s} [-cr]
+        \\Usage: {s} [-crd]
         \\
         \\  -c | Enable 12-hour clock
         \\  -r | Enable red-color mode
+        \\  -d | Display the date and time
         \\
     ;
 
@@ -37,14 +43,12 @@ pub fn main() !void {
         for (arg[1..]) |c| switch (c) {
             'c' => ctx.flags.am_pm = true, // 12 hour
             'r' => ctx.flags.red_tint = true, // red
+            'd' => ctx.flags.show_date = true, // date
             else => {
                 return try stdout.writer().print(help_fmt, .{args[0]});
             },
         };
     }
-
-    const tz_offset = tz.get_timezone_offset();
-    const timezone = datetime.Timezone.create("Local", tz_offset);
 
     const termios = try Termios.init();
 
@@ -76,11 +80,11 @@ pub fn main() !void {
         std.posix.SIG.TERM,
         std.posix.SIG.QUIT,
     }) |sig| {
-        try std.posix.sigaction(sig, &sigaction, null);
+        std.posix.sigaction(sig, &sigaction, null);
     }
 
     var last_second: u8 = 0xff;
-    var buffer: [64]u8 = undefined;
+    var buffer: [4]u8 = undefined;
 
     main: while (ctx.running.load(.seq_cst)) {
         const start = std.time.nanoTimestamp();
@@ -108,28 +112,27 @@ pub fn main() !void {
             _ = try stdout.writeAll("\x1b[2J");
         }
 
-        const now = datetime.Datetime.now().shiftTimezone(&timezone);
+        const now = try zeit.instant(.{ .timezone = &local_tz });
+        const datetime = now.time();
 
         // Render
-        if (last_second != now.time.second) {
-            last_second = now.time.second;
+        if (last_second != datetime.second) {
+            last_second = datetime.second;
 
-            const second = now.time.second;
-            const minute = now.time.minute;
-            const is_am = now.time.hour <= 12;
-            const hour = calculate_hour: {
-                var hour = now.time.hour;
+            const is_am = datetime.hour <= 12;
+            const numbers = print: {
+                var hour = datetime.hour;
+
                 if (ctx.flags.am_pm) {
                     if (is_am and hour == 0) hour = 12;
                     if (!is_am) hour -= 12;
                 }
-                break :calculate_hour hour;
+
+                break :print try std.fmt.bufPrint(buffer[0..4], "{d:0>2}{d:0>2}", .{ hour, datetime.minute });
             };
 
-            const numbers = try std.fmt.bufPrint(buffer[0..4], "{d:0>2}{d:0>2}", .{ hour, minute });
-
-            const block_width = 3;
-            const block_height = 5;
+            const BLOCK_WIDTH = 3;
+            const BLOCK_HEIGHT = 5;
 
             const x_mid_offset = 2;
             const x_mid = @divFloor(ctx.size.col.load(.seq_cst), 2) + x_mid_offset;
@@ -142,6 +145,8 @@ pub fn main() !void {
             const color_bold = if (ctx.flags.red_tint) art.redtint_bold else art.default_bold;
             const color_dim = if (ctx.flags.red_tint) art.redtint_dim else art.default_dim;
 
+            const writer = stdout.writer();
+
             // Draw hour and minute blocks
             for (0..4) |i| {
                 const num = numbers[i] - '0'; // all inputs are between ascii 0 and ascii 9
@@ -152,15 +157,15 @@ pub fn main() !void {
                     @as(isize, if (i < 2) -2 else 2);
 
                 // Draw block
-                for (0..block_height) |y| for (0..block_width) |x| {
+                for (0..BLOCK_HEIGHT) |y| for (0..BLOCK_WIDTH) |x| {
                     const art_bit_0: u15 = 0x4000;
-                    const art_index: u4 = @intCast(y * block_width + x);
-                    const representation: u6 = @intCast((block_width * block_height * i) + (x * block_height + y));
+                    const art_index: u4 = @intCast(y * BLOCK_WIDTH + x);
+                    const representation: u6 = @intCast((BLOCK_WIDTH * BLOCK_HEIGHT * i) + (x * BLOCK_HEIGHT + y));
 
-                    const highlight = if (representation == second) color_highlight else "";
+                    const highlight = if (representation == datetime.second) color_highlight else "";
                     const color = if (current_art & (art_bit_0 >> art_index) != 0) color_bold else color_dim;
 
-                    _ = try stdout.writer().print("\x1b[{d};{d}H" ++ "{s}{s}" ++ "{d:0>2}" ++ "\x1b[m", .{
+                    try writer.print("\x1b[{d};{d}H" ++ "{s}{s}" ++ "{d:0>2}" ++ "\x1b[m", .{
                         y_mid + y,
                         x_mid + x_offset + @as(isize, @intCast(x)) * x_step,
                         highlight,
@@ -170,18 +175,31 @@ pub fn main() !void {
                 };
             }
 
+            // Middle column
+            const is_shown = @mod(datetime.second, 2) == 0;
+            inline for ([2]usize{ 1, 3 }) |y| {
+                try writer.print("\x1b[{d};{d}H", .{ y_mid + y, x_mid - x_mid_offset });
+                try writer.print(
+                    "{s}{s}",
+                    if (is_shown)
+                        .{ color_bold, "🬇🬃" }
+                    else
+                        .{ "", "  " },
+                );
+            }
+
             // AM / PM indicator
             if (ctx.flags.am_pm) {
                 const x_offset = 4 + x_spacing * 2;
 
-                for (0..block_height) |y| for (0..block_width) |x| {
+                for (0..BLOCK_HEIGHT) |y| for (0..BLOCK_WIDTH) |x| {
                     const art_bit_0: u15 = 0x4000;
-                    const art_index: u4 = @intCast(y * block_width + x);
+                    const art_index: u4 = @intCast(y * BLOCK_WIDTH + x);
 
                     const current_art = art.blocks[if (is_am) 10 else 11];
                     const color = if (current_art & (art_bit_0 >> art_index) != 0) color_bold else color_dim;
 
-                    _ = try stdout.writer().print("\x1b[{d};{d}H" ++ "{s}" ++ "{s}" ++ "\x1b[m", .{
+                    try writer.print("\x1b[{d};{d}H" ++ "{s}" ++ "{s}" ++ "\x1b[m", .{
                         y_mid + y,
                         x_mid + x_offset + x * x_step,
                         color,
@@ -190,17 +208,28 @@ pub fn main() !void {
                 };
             }
 
-            // Middle column
-            const is_shown = @mod(second, 2) == 0;
-            inline for ([2]usize{ 1, 3 }) |y| {
-                _ = try stdout.writer().print("\x1b[{d};{d}H", .{ y_mid + y, x_mid - x_mid_offset });
-                _ = try stdout.writer().print(
-                    "{s}{s}",
-                    if (is_shown)
-                        .{ color_bold, "🬇🬃" }
-                    else
-                        .{ "", "  " },
-                );
+            // Date string
+            if (ctx.flags.show_date) {
+                var weekday_month: [6]u8 = undefined;
+                var fbs = std.io.fixedBufferStream(&weekday_month);
+                try datetime.strftime(fbs.writer(), "%a%b");
+
+                try writer.print("\x1b[{d};{d}H" ++
+                    "{s}{s}, " ++ "\x1b[m" ++
+                    "{s}{s} " ++ "\x1b[m" ++
+                    "{s}{d} " ++ "\x1b[m" ++
+                    "{s}{d}" ++ "\x1b[m", .{
+                    y_mid + BLOCK_HEIGHT + 1,
+                    x_mid - BLOCK_WIDTH * 6 - x_mid_offset * 2,
+                    color_bold,
+                    weekday_month[0..3],
+                    color_dim,
+                    weekday_month[3..6],
+                    color_bold,
+                    datetime.day,
+                    color_dim,
+                    datetime.year,
+                });
             }
         }
 

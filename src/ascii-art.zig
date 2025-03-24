@@ -17,7 +17,7 @@ pub const blocks: [12]u15 = .{
 
 // Normal colors
 pub const default_highlight = "\x1b[48;5;8m";
-pub const default_bold = "\x1b[1m";
+pub const default_bold = "\x1b[38;5;231m";
 pub const default_dim = "\x1b[38;5;238m";
 
 // Red-tint

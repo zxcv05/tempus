@@ -1,10 +1,12 @@
 .{
-    .name = "tempus-zig",
-    .version = "0.0.0",
+    .name = .tempus,
+    .version = "1.0.1",
+    .fingerprint = 0x765afcf2cae58252,
+
     .dependencies = .{
-        .datetime = .{
-            .url = "git+https://github.com/frmdstryr/zig-datetime#70aebf28fb3e137cd84123a9349d157a74708721",
-            .hash = "122077215ce36e125a490e59ec1748ffd4f6ba00d4d14f7308978e5360711d72d77f",
+        .zeit = .{
+            .url = "git+https://github.com/rockorager/zeit#175cf91a641790799e9d676878a9fe814aaed134",
+            .hash = "zeit-0.6.0-5I6bk5daAgC-P60TjxRqW0bYknfCGxJp-03eS9UjGrO7",
         },
     },
     .paths = .{

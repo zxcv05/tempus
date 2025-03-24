@@ -16,17 +16,7 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.link_gc_sections = true;
-
-    exe.root_module.addImport("datetime", b.dependency("datetime", .{}).module("zig-datetime"));
-
-    // TODO: Uncomment when build error gets fixed
-    // const time_h = b.addTranslateC(.{
-    //     .optimize = optimize,
-    //     .target = target,
-    //     .root_source_file = .{ .cwd_relative = "/usr/include/time.h" },
-    // });
-
-    // exe.root_module.addImport("time_h", time_h.addModule("time_h"));
+    exe.root_module.addImport("zeit", b.dependency("zeit", .{}).module("zeit"));
 
     b.installArtifact(exe);
 

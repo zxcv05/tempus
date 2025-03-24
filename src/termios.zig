@@ -47,8 +47,8 @@ pub fn get_size() !Size {
     }
 
     return .{
-        .col = size.ws_col,
-        .row = size.ws_row,
+        .col = size.col,
+        .row = size.row,
     };
 }
 
