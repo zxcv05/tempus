@@ -215,8 +215,8 @@ pub fn main() !void {
                 try datetime.strftime(fbs.writer(), "%a%b");
 
                 try writer.print("\x1b[{d};{d}H" ++
-                    "{s}{s}, " ++ "\x1b[m" ++
-                    "{s}{s} " ++ "\x1b[m" ++
+                    "{s}{s}" ++ "\x1b[m" ++
+                    "{s}, {s} " ++ "\x1b[m" ++
                     "{s}{d} " ++ "\x1b[m" ++
                     "{s}{d}" ++ "\x1b[m", .{
                     y_mid + BLOCK_HEIGHT + 1,
