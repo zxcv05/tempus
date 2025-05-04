@@ -6,4 +6,5 @@ Developed using zig 0.13.0, updated for 0.14.0<br/>
 `zig build`
 
 ## Run
-`zig-out/bin/tempus` or `zig build run`
+`zig-out/bin/tempus` or `zig build run`<br/>
+Run with `--help` to see usage
