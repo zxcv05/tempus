@@ -57,15 +57,6 @@ pub fn main() !void {
         }
     }
 
-    var inputs: std.ArrayList(u8) = try .initCapacity(alloc, 256);
-    defer inputs.deinit();
-
-    defer {
-        for (inputs.items) |byte|
-            std.debug.print("{d} ", .{byte});
-        std.debug.print("\n", .{});
-    }
-
     const termios = try Termios.init();
 
     try termios.set();
