@@ -13,14 +13,14 @@ pub fn main() !void {
 
     const alloc = gpa.allocator();
 
-    var env = try std.process.getEnvMap(alloc);
-    defer env.deinit();
+    const local_tz = get_tz: {
+        var env = try std.process.getEnvMap(alloc);
+        defer env.deinit();
 
-    const local_tz = try zeit.local(alloc, &env);
+        break :get_tz try zeit.local(alloc, &env);
+    };
+
     defer local_tz.deinit();
-
-    const args = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, args);
 
     const stdout = std.io.getStdOut();
     defer stdout.close();
@@ -28,26 +28,42 @@ pub fn main() !void {
     const stdin = std.io.getStdIn();
     defer stdin.close();
 
-    const help_fmt =
-        \\Usage: {s} [-crd]
-        \\
-        \\  -c | Enable 12-hour clock
-        \\  -r | Enable red-color mode
-        \\  -d | Display the date and time
-        \\
-    ;
+    var stdin_reader: std.io.BufferedReader(8, std.fs.File.Reader) = .{ .unbuffered_reader = stdin.reader() };
 
-    for (args[1..]) |arg| {
-        if (arg[0] != '-') _ = return try stdout.writer().print(help_fmt, .{args[0]});
+    {
+        const args = try std.process.argsAlloc(alloc);
+        defer std.process.argsFree(alloc, args);
 
-        for (arg[1..]) |c| switch (c) {
-            'c' => ctx.flags.am_pm = true, // 12 hour
-            'r' => ctx.flags.red_tint = true, // red
-            'd' => ctx.flags.show_date = true, // date
-            else => {
-                return try stdout.writer().print(help_fmt, .{args[0]});
-            },
-        };
+        const help_fmt =
+            \\Usage: {s} [-crd]
+            \\
+            \\  -c | Enable 12-hour clock
+            \\  -r | Enable red-color mode
+            \\  -d | Display the date and time
+            \\
+        ;
+
+        for (args[1..]) |arg| {
+            if (arg[0] != '-') _ = return try stdout.writer().print(help_fmt, .{args[0]});
+
+            for (arg[1..]) |c| switch (c) {
+                'c' => ctx.flags.am_pm = true, // 12 hour
+                'r' => ctx.flags.red_tint = true, // red
+                'd' => ctx.flags.show_date = true, // date
+                else => {
+                    return try stdout.writer().print(help_fmt, .{args[0]});
+                },
+            };
+        }
+    }
+
+    var inputs: std.ArrayList(u8) = try .initCapacity(alloc, 256);
+    defer inputs.deinit();
+
+    defer {
+        for (inputs.items) |byte|
+            std.debug.print("{d} ", .{byte});
+        std.debug.print("\n", .{});
     }
 
     const termios = try Termios.init();
@@ -83,6 +99,7 @@ pub fn main() !void {
         std.posix.sigaction(sig, &sigaction, null);
     }
 
+    var last_day: u8 = 0xff;
     var last_second: u8 = 0xff;
     var buffer: [4]u8 = undefined;
 
@@ -90,30 +107,29 @@ pub fn main() !void {
         const start = std.time.nanoTimestamp();
 
         // Input handling
-        while (true) {
-            const read = stdin.read(buffer[0..]) catch |e| switch (e) {
-                error.WouldBlock => 0,
-                else => return e,
-            };
+        while (stdin_reader.reader().readByte() catch null) |byte| process_byte: switch (byte) {
+            27, // escape
+            => {
+                const next_byte = stdin_reader.reader().readByte() catch break :main;
+                if (next_byte != 'O' and next_byte != '[') continue :process_byte next_byte;
+                _ = stdin_reader.reader().readByte() catch continue;
+            },
 
-            for (0..read) |i| switch (buffer[i]) {
-                3, // ctrl+c
-                27, // escape
-                28, // ctrl+\
-                => break :main,
-                else => {},
-            };
+            28, // ctrl \
+            3, // ctrl c
+            => break :main,
 
-            if (read < buffer.len) break;
-        }
-
-        // Update
-        if (ctx.size.changed.swap(false, .seq_cst)) {
-            _ = try stdout.writeAll("\x1b[2J");
-        }
+            else => {},
+        };
 
         const now = try zeit.instant(.{ .timezone = &local_tz });
         const datetime = now.time();
+
+        // Update
+        if (ctx.size.changed.swap(false, .seq_cst) or last_day != datetime.day) {
+            last_day = datetime.day;
+            _ = try stdout.writeAll("\x1b[2J");
+        }
 
         // Render
         if (last_second != datetime.second) {
