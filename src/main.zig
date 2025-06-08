@@ -94,7 +94,7 @@ pub fn main() !void {
     var last_second: u8 = 0xff;
     var buffer: [4]u8 = undefined;
 
-    main: while (ctx.running.load(.seq_cst)) {
+    main: while (ctx.running.load(.acquire)) {
         const start = std.time.nanoTimestamp();
 
         // Input handling
@@ -117,7 +117,7 @@ pub fn main() !void {
         const datetime = now.time();
 
         // Update
-        if (ctx.size.changed.swap(false, .seq_cst) or last_day != datetime.day) {
+        if (ctx.size.changed.swap(false, .acquire) or last_day != datetime.day) {
             last_day = datetime.day;
             _ = try stdout.writeAll("\x1b[2J");
         }
@@ -142,8 +142,8 @@ pub fn main() !void {
             const BLOCK_HEIGHT = 5;
 
             const x_mid_offset = 2;
-            const x_mid = @divFloor(ctx.size.col.load(.seq_cst), 2) + x_mid_offset;
-            const y_mid = @divFloor(ctx.size.row.load(.seq_cst), 2) - 1;
+            const x_mid = @divFloor(ctx.size.col.load(.acquire), 2) + x_mid_offset;
+            const y_mid = @divFloor(ctx.size.row.load(.acquire), 2) - 1;
 
             const x_step: i8 = 3;
             const x_spacing = 10;
@@ -252,15 +252,15 @@ fn sigaction_handler(signal: i32) callconv(.C) void {
         std.posix.SIG.WINCH => {
             const size = Termios.get_size() catch return;
 
-            ctx.size.changed.store(true, .seq_cst);
-            ctx.size.col.store(size.col, .seq_cst);
-            ctx.size.row.store(size.row, .seq_cst);
+            ctx.size.changed.store(true, .release);
+            ctx.size.col.store(size.col, .release);
+            ctx.size.row.store(size.row, .release);
         },
         std.posix.SIG.HUP,
         std.posix.SIG.INT,
         std.posix.SIG.TERM,
         std.posix.SIG.QUIT,
-        => ctx.running.store(false, .seq_cst),
+        => ctx.running.store(false, .release),
         else => unreachable,
     }
 }
